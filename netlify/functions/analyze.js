@@ -1,9 +1,7 @@
-// Rate limiting: simple in-memory store (resets on cold start)
-// For production, use Netlify Blobs, Upstash Redis, or another shared store.
 const rateLimit = new Map();
 
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX = 10; // max 10 requests per IP per minute
+const RATE_LIMIT_WINDOW = 60 * 1000;
+const RATE_LIMIT_MAX = 10;
 
 function checkRateLimit(ip) {
   const now = Date.now();
@@ -22,7 +20,6 @@ function checkRateLimit(ip) {
   return true;
 }
 
-// Clean up old entries every 5 minutes to avoid memory leak
 setInterval(() => {
   const now = Date.now();
   for (const [key, val] of rateLimit.entries()) {
@@ -49,14 +46,127 @@ function jsonResponse(statusCode, body) {
   };
 }
 
-function extractJsonText(apiData) {
-  const parts = apiData?.candidates?.[0]?.content?.parts || [];
+function getRawModelText(data) {
+  const candidate = data?.candidates?.[0];
+  const parts = candidate?.content?.parts || [];
 
-  return parts
-    .map((part) => (typeof part?.text === "string" ? part.text : ""))
-    .join("")
-    .replace(/```json|```/gi, "")
+  const joined = parts
+    .map((part) => {
+      if (typeof part?.text === "string") return part.text;
+      return "";
+    })
+    .join("\n")
     .trim();
+
+  return joined;
+}
+
+function extractJsonCandidate(raw) {
+  if (!raw) return "";
+
+  const cleaned = raw
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return cleaned.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return cleaned;
+}
+
+function tryParseModelJson(raw) {
+  const attempts = [];
+
+  attempts.push(raw);
+  attempts.push(extractJsonCandidate(raw));
+
+  for (const attempt of attempts) {
+    if (!attempt) continue;
+
+    try {
+      return JSON.parse(attempt);
+    } catch {}
+  }
+
+  return null;
+}
+
+function normalizeResult(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const perfectSong = parsed.perfect_song || {};
+  const moreSongs = Array.isArray(parsed.more_songs) ? parsed.more_songs : [];
+
+  const normalized = {
+    vibe_description:
+      typeof parsed.vibe_description === "string"
+        ? parsed.vibe_description.trim()
+        : "",
+    perfect_song: {
+      title:
+        typeof perfectSong.title === "string" ? perfectSong.title.trim() : "",
+      artist:
+        typeof perfectSong.artist === "string" ? perfectSong.artist.trim() : "",
+      reason:
+        typeof perfectSong.reason === "string"
+          ? perfectSong.reason.trim()
+          : "",
+      tags: Array.isArray(perfectSong.tags)
+        ? perfectSong.tags.filter((tag) => typeof tag === "string" && tag.trim())
+        : [],
+    },
+    more_songs: moreSongs
+      .filter((song) => song && typeof song === "object")
+      .map((song) => ({
+        title: typeof song.title === "string" ? song.title.trim() : "",
+        artist: typeof song.artist === "string" ? song.artist.trim() : "",
+        mood_tag:
+          typeof song.mood_tag === "string" ? song.mood_tag.trim() : "",
+      }))
+      .filter((song) => song.title && song.artist),
+  };
+
+  if (
+    parsed.outfit_analysis &&
+    typeof parsed.outfit_analysis === "object"
+  ) {
+    normalized.outfit_analysis = {
+      style_aesthetic:
+        typeof parsed.outfit_analysis.style_aesthetic === "string"
+          ? parsed.outfit_analysis.style_aesthetic.trim()
+          : "",
+      color_story:
+        typeof parsed.outfit_analysis.color_story === "string"
+          ? parsed.outfit_analysis.color_story.trim()
+          : "",
+      vibe_summary:
+        typeof parsed.outfit_analysis.vibe_summary === "string"
+          ? parsed.outfit_analysis.vibe_summary.trim()
+          : "",
+      style_tags: Array.isArray(parsed.outfit_analysis.style_tags)
+        ? parsed.outfit_analysis.style_tags.filter(
+            (tag) => typeof tag === "string" && tag.trim()
+          )
+        : [],
+    };
+  }
+
+  if (
+    !normalized.vibe_description ||
+    !normalized.perfect_song.title ||
+    !normalized.perfect_song.artist ||
+    !normalized.perfect_song.reason ||
+    normalized.more_songs.length === 0
+  ) {
+    return null;
+  }
+
+  return normalized;
 }
 
 export async function handler(event) {
@@ -111,7 +221,6 @@ export async function handler(event) {
     return jsonResponse(400, { error: "Invalid image type." });
   }
 
-  // Rough size check: base64 of 10MB image is about 13.3M chars
   if (imageBase64.length > 14_000_000) {
     return jsonResponse(413, {
       error: "Image too large. Please use an image under 10MB.",
@@ -133,63 +242,20 @@ export async function handler(event) {
           {
             text: `${prompt}
 
-Return exactly one valid JSON object.
-Do not wrap it in markdown fences.
-Do not add any explanation before or after the JSON.`,
+IMPORTANT:
+- Return exactly one JSON object
+- No markdown fences
+- No intro text
+- No notes after the JSON
+- Use double quotes for all keys and string values`,
           },
         ],
       },
     ],
     generationConfig: {
-      temperature: 0.2,
+      temperature: 0,
       maxOutputTokens: 1024,
       responseMimeType: "application/json",
-      responseSchema: {
-        type: "OBJECT",
-        properties: {
-          vibe_description: {
-            type: "STRING",
-          },
-          outfit_analysis: {
-            type: "OBJECT",
-            properties: {
-              style_aesthetic: { type: "STRING" },
-              color_story: { type: "STRING" },
-              vibe_summary: { type: "STRING" },
-              style_tags: {
-                type: "ARRAY",
-                items: { type: "STRING" },
-              },
-            },
-          },
-          perfect_song: {
-            type: "OBJECT",
-            properties: {
-              title: { type: "STRING" },
-              artist: { type: "STRING" },
-              reason: { type: "STRING" },
-              tags: {
-                type: "ARRAY",
-                items: { type: "STRING" },
-              },
-            },
-            required: ["title", "artist", "reason", "tags"],
-          },
-          more_songs: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                title: { type: "STRING" },
-                artist: { type: "STRING" },
-                mood_tag: { type: "STRING" },
-              },
-              required: ["title", "artist", "mood_tag"],
-            },
-          },
-        },
-        required: ["vibe_description", "perfect_song", "more_songs"],
-      },
     },
     safetySettings: [
       {
@@ -216,44 +282,40 @@ Do not add any explanation before or after the JSON.`,
 
     if (!response.ok) {
       const msg = data?.error?.message || "Gemini API error";
-      console.error("Gemini API error:", data);
+      console.error("Gemini API error:", JSON.stringify(data, null, 2));
       return jsonResponse(response.status, { error: msg });
     }
 
-    const raw = extractJsonText(data);
+    const raw = getRawModelText(data);
 
     if (!raw) {
-      console.error("Gemini empty response:", JSON.stringify(data, null, 2));
+      console.error("Gemini returned no text:", JSON.stringify(data, null, 2));
       return jsonResponse(500, {
-        error: "Empty response from Gemini.",
+        error: "Empty response from AI. Please try again.",
       });
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      console.error("Gemini JSON parse failed:", raw);
+    const parsed = tryParseModelJson(raw);
+
+    if (!parsed) {
+      console.error("Raw Gemini output that failed to parse:");
+      console.error(raw);
       return jsonResponse(500, {
         error: "AI returned invalid JSON. Please try again.",
       });
     }
 
-    if (
-      !parsed?.vibe_description ||
-      !parsed?.perfect_song?.title ||
-      !parsed?.perfect_song?.artist ||
-      !parsed?.perfect_song?.reason ||
-      !Array.isArray(parsed?.perfect_song?.tags) ||
-      !Array.isArray(parsed?.more_songs)
-    ) {
-      console.error("Gemini incomplete response:", parsed);
+    const normalized = normalizeResult(parsed);
+
+    if (!normalized) {
+      console.error("Parsed Gemini JSON missing required fields:");
+      console.error(JSON.stringify(parsed, null, 2));
       return jsonResponse(500, {
         error: "Incomplete response from AI. Please try again.",
       });
     }
 
-    return jsonResponse(200, parsed);
+    return jsonResponse(200, normalized);
   } catch (err) {
     console.error("Gemini fetch error:", err);
     return jsonResponse(500, {
