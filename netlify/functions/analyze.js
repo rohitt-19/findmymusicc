@@ -55,7 +55,7 @@ exports.handler = async function (event) {
     return { statusCode: 413, headers, body: JSON.stringify({ error: "Image too large. Use an image under 10MB." }) };
   }
 
-  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
   const geminiBody = {
     contents: [{
