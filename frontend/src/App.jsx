@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import styled, { createGlobalStyle } from "./styles.js";
 import StepUpload from "./components/StepUpload.jsx";
@@ -10,10 +10,24 @@ import Header from "./components/Header.jsx";
 import StepsBar from "./components/StepsBar.jsx";
 
 const PT_PROMPTS = {
-  scene: `Analyze the SCENE: its setting, environment, colors, lighting, time of day, weather, and emotional atmosphere. The visual storytelling of the place drives the music.`,
-  person: `Analyze the PERSON'S OUTFIT AND STYLE as the PRIMARY focus. Identify: their specific fashion aesthetic (e.g. Dark Academia, Streetwear, Y2K, Cottagecore, Clean Girl, Grunge, Soft Boy, Baddie, Old Money, Gorpcore, etc.), exact clothing items, color palette, accessories, body language, and overall personality vibe they project. Songs must feel like what THIS person's playlist actually sounds like based on how they dress.`,
-  both: `Analyze BOTH the person's OUTFIT AND STYLE (primary) AND the scene/setting (secondary). How does their fashion interact with the environment? Songs reflect both their personal aesthetic and the atmosphere of the place.`,
-  any: `Analyze everything — subjects, setting, people if any, fashion if visible, colors, mood, lighting, atmosphere. Use all visual signals to determine the perfect sonic match.`,
+  scene: `VISUAL ANALYSIS — SCENE:
+Deeply analyze the scene like a cinematographer would. Note: exact setting (urban/rural/indoor/outdoor), dominant colors and their emotional weight, lighting quality (golden hour? neon? overcast?), time of day, weather/season, textures, the overall emotional atmosphere. What story does this place tell? What kind of person exists in this space?`,
+
+  person: `VISUAL ANALYSIS — OUTFIT & PERSONAL AESTHETIC (this is your PRIMARY job):
+You are a fashion-forward music curator. Analyze every detail of this person's look:
+1. FASHION AESTHETIC: Name it precisely (e.g. "South Delhi Streetwear", "Mumbai Indie Kid", "Dark Academia", "Clean Girl Aesthetic", "Hypebeast", "Old Money", "Y2K Revival", "Gully Rap Energy", "Soft Boy", "Baddie", etc.)
+2. CLOTHING: Specific items, brands if visible, how they're styled
+3. COLOR PALETTE: The exact color story of the outfit
+4. ACCESSORIES & DETAILS: Shoes, bags, jewelry, hair, makeup
+5. BODY LANGUAGE & ENERGY: How do they carry themselves? What vibe do they radiate?
+6. PERSONALITY READ: What does this aesthetic say about their taste in music, their personality, their world?
+Songs must feel like what THIS exact person would have in their playlist — not just the aesthetic category, but THIS specific human.`,
+
+  both: `VISUAL ANALYSIS — PERSON IN ENVIRONMENT:
+Analyze the PERSON'S STYLE first (fashion aesthetic, outfit, vibe, personality energy) and then the SETTING they're in. How does their look interact with the environment? A person in streetwear in a college corridor vs a rooftop vs a mall all feel different. Songs must capture BOTH their personal aesthetic and the atmosphere of where they are.`,
+
+  any: `VISUAL ANALYSIS — FULL SCENE:
+Read everything in this image like a music supervisor scoring a film scene. Analyze: people and their energy/outfits if present, the setting and atmosphere, colors and lighting, mood, time, textures. What genre of film would this be? What feeling does it leave? Use ALL of this to determine the perfect sonic match.`,
 };
 
 const LOADING_MSGS = {
@@ -22,6 +36,26 @@ const LOADING_MSGS = {
   both: ["Taking in the full picture...", "Reading outfit, setting & mood...", "Matching your whole vibe...", "Almost ready..."],
   any: ["Vibing with your photo...", "Consulting the music universe...", "Matching aesthetics to melodies...", "Almost ready..."],
 };
+
+// Indian Hip-Hop scene knowledge injected into every request
+const INDIAN_SCENE_CONTEXT = `
+INDIAN MUSIC SCENE KNOWLEDGE (use this when recommending Indian music):
+- Seedhe Maut: Delhi-based rap duo (Encore ABJ + Calm). Raw, introspective, politically conscious Hindi rap. Albums: Bayaan, Nayaab. Signature: dense wordplay, lo-fi beats.
+- Divine: Mumbai gully rap pioneer. Street anthems, motivational, Hindi/Hinglish. Collabed with Nas. Songs: Mere Gully Mein, Gunehgar, Mirchi.
+- KR$NA: Delhi rapper. Technical, fast-paced, complex Hindi bars. Known for diss tracks and street rap credibility.
+- Prabh Deep: Delhi. Conscious hip-hop, social commentary, Punjabi/Hindi. Album: Class-Sikh.
+- Hanumankind: Kerala-born rapper. Blends Malayalam/English/Hindi. Big Jump went viral globally. Energetic live shows.
+- Raftaar: High-energy Hindi rap, Desi trap. Mainstream but respected. Fast delivery.
+- Badshah: Desi pop-rap, party anthems, massive streaming numbers.
+- Nucleya: Bass music, Indian electronic, festival energy. Blends folk samples with EDM.
+- AP Dhillon: Punjabi pop-R&B crossover. Global sound. Brown Munde, With You.
+- Diljit Dosanjh: Punjabi superstar. Authentic bhangra meets modern pop.
+- Prateek Kuhad: Delhi indie folk. Soft, emotional, English/Hindi. cold/mess, Kasoor.
+- Ritviz: Pune. Electronic + Hindi indie. Udd Gaye, Sage.
+- Talwiinder: Indie Punjabi. Melancholic, cinematic, minimal production.
+- Anuv Jain: Indie pop. Soft, emotional, Hindi. Baarishein, Gul.
+- When Chai Met Toast: Kerala indie pop. Warm, feel-good, English/Hindi.
+`;
 
 export default function App() {
   const [step, setStep] = useState(1);
@@ -38,6 +72,9 @@ export default function App() {
   const [error, setError] = useState(null);
 
   const isOutfit = photoType === "person" || photoType === "both";
+  const hasIndianTaste = genres.some(g => ["Bollywood","Indian Hip-Hop","Gully Rap","Punjabi Pop","Desi Trap","Indie Hindi","Indian Classical","Sufi / Folk"].includes(g));
+  const hasIndianArtist = artists.some(a => ["Seedhe Maut","Divine","Raftaar","Badshah","Hanumankind","KR$NA","Prabh Deep","Nucleya","AP Dhillon","Diljit Dosanjh","Prateek Kuhad","Ritviz","Talwiinder","When Chai Met Toast","Anuv Jain"].includes(a));
+  const wantsIndian = hasIndianTaste || hasIndianArtist;
 
   const ENERGY_L = ["Dead Calm", "Chill", "Medium", "Energetic", "Full Hype"];
   const LYRIC_L = ["Instrumental / No lyrics", "Balanced", "Deep & Meaningful"];
@@ -53,39 +90,63 @@ export default function App() {
     const gStr = genres.length ? genres.join(", ") : "any genre";
     const aStr = artists.length ? artists.join(", ") : "any";
 
-    const prompt = `You are a world-class music curator${isOutfit ? " and fashion analyst" : ""}.
+    const prompt = `You are an elite music curator with deep knowledge of both global and Indian music scenes. Your recommendations are known for being surprisingly accurate, specific, and non-obvious.
 
 ${PT_PROMPTS[photoType]}
 
-User music preferences:
-- Genres: ${gStr}
-- Favourite artists (style reference): ${aStr}
-- Energy: ${ENERGY_L[energy]}
+${wantsIndian ? INDIAN_SCENE_CONTEXT : ""}
+
+USER'S MUSIC PROFILE:
+- Genres they love: ${gStr}
+- Favourite artists (MOST IMPORTANT — use these as the primary signal for recommendations): ${aStr}
+- Energy preference: ${ENERGY_L[energy]}
 - Lyrical depth: ${LYRIC_L[lyric]}
 - Era: ${ERA_L[era]}
 
-Return ONLY a valid JSON object, no extra text, no markdown:
+RECOMMENDATION RULES (follow strictly):
+1. The selected ARTISTS are the strongest signal. If they chose Seedhe Maut + The Weeknd, recommendations must live in that world — don't give generic pop.
+2. NEVER repeat the same artist twice across all 6 recommendations.
+3. Include at least one deep cut / underrated pick that a true music fan would appreciate.
+4. Each song must match BOTH the visual aesthetic AND the user's music taste simultaneously.
+5. mood_tag must be ultra-specific (not just "sad" — use things like "3am drive energy", "rooftop monsoon vibes", "Delhi winter nostalgia", "rage with melody", etc.)
+6. If Indian genres/artists selected, at least 2-3 of the more_songs must be Indian.
+7. The "reason" field must specifically reference what you saw in the image — make it feel personal.
+8. For trending_now picks: recommend songs that are genuinely buzzing in ${new Date().getFullYear()} — recent releases, viral moments, chart-toppers. These should feel current and exciting.
+
+Return ONLY a valid JSON object, no markdown, no extra text:
 {
-  "vibe_description": "2 vivid sentences describing the aesthetic and mood of the image",
+  "vibe_description": "2 vivid, poetic sentences describing the aesthetic and emotional mood of the image — make it feel like a caption",
   ${isOutfit ? `"outfit_analysis": {
-    "style_aesthetic": "Specific fashion aesthetic name (be precise and creative)",
-    "color_story": "Color palette in 5 words or less",
-    "vibe_summary": "2 sentences: what their style says about personality and music taste",
+    "style_aesthetic": "Precise fashion aesthetic name — be creative and specific",
+    "color_story": "The color palette in 5 words or less",
+    "vibe_summary": "2 sentences: what their style reveals about their personality and music taste",
     "style_tags": ["tag1","tag2","tag3","tag4","tag5"]
   },` : ""}
   "perfect_song": {
     "title": "Song title",
     "artist": "Artist name",
-    "reason": "2-3 sentences why this is the perfect match${isOutfit ? ". Mention the outfit aesthetic explicitly" : ""}",
-    "tags": ["mood","genre","vibe"]
+    "reason": "2-3 sentences — be specific about what in the image/outfit led you here. Make it feel like a human curator wrote it.",
+    "tags": ["specific mood tag","genre","vibe word"]
   },
   "more_songs": [
-    {"title":"...","artist":"...","mood_tag":"..."},
+    {"title":"...","artist":"...","mood_tag":"ultra specific vibe in 3-5 words"},
     {"title":"...","artist":"...","mood_tag":"..."},
     {"title":"...","artist":"...","mood_tag":"..."},
     {"title":"...","artist":"...","mood_tag":"..."},
     {"title":"...","artist":"...","mood_tag":"..."}
-  ]
+  ],
+  "trending_now": {
+    "international": {
+      "title": "A song that is genuinely trending/buzzing globally right now in ${new Date().getFullYear()}",
+      "artist": "Artist name",
+      "why_trending": "One sentence on why this is having a moment right now"
+    },
+    "indian": {
+      "title": "A song that is genuinely trending in India right now in ${new Date().getFullYear()} — could be Hindi rap, Bollywood, Punjabi, indie",
+      "artist": "Artist name",
+      "why_trending": "One sentence on why this is having a moment in India right now"
+    }
+  }
 }`;
 
     try {
@@ -101,8 +162,6 @@ Return ONLY a valid JSON object, no extra text, no markdown:
 
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "API error");
-
-      // Gemini API now returns parsed JSON directly from the server
       setResults(data);
       setLoading(false);
     } catch (err) {
@@ -120,7 +179,6 @@ Return ONLY a valid JSON object, no extra text, no markdown:
 
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
-      {/* Ambient blobs */}
       <div style={{ position: "fixed", top: "-20vh", left: "-10vw", width: "min(60vw,700px)", height: "min(60vw,700px)", borderRadius: "50%", background: "radial-gradient(circle,rgba(124,58,237,0.12) 0%,transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
       <div style={{ position: "fixed", bottom: "-20vh", right: "-10vw", width: "min(50vw,600px)", height: "min(50vw,600px)", borderRadius: "50%", background: "radial-gradient(circle,rgba(244,114,182,0.08) 0%,transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
 
