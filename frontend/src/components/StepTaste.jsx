@@ -2,7 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { tokens } from "../styles.js";
 
-const GENRES = ["Hip-Hop","R&B / Soul","Pop","Indie / Alt","Electronic","Lo-fi","Rock","K-Pop","Jazz","Classical","Latin","Afrobeats","Metal","Ambient","Bollywood","Drill"];
+const GENRES = ["Hip-Hop","R&B / Soul","Pop","Indie / Alt","Electronic","Lo-fi","Rock","K-Pop","Jazz","Classical","Latin","Afrobeats","Metal","Ambient","Drill","Bollywood","Indian Hip-Hop","Gully Rap","Punjabi Pop","Desi Trap","Indie Hindi","Indian Classical","Sufi / Folk"];
 const ENERGY_L = ["Dead Calm","Chill","Medium","Energetic","Full Hype"];
 const LYRIC_L = ["Instrumental / No lyrics","Balanced","Deep & Meaningful"];
 const ERA_L = ["Any era","Classic (70s–90s)","2000s–2010s","Fresh (2020s+)"];
