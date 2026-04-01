@@ -4,19 +4,19 @@ const MAX = 10;
 
 function checkRate(ip) {
   const now = Date.now();
-  const e = rateLimit.get(ip);
+  const entry = rateLimit.get(ip);
 
-  if (!e || now - e.t > WINDOW) {
+  if (!entry || now - entry.t > WINDOW) {
     rateLimit.set(ip, { count: 1, t: now });
     return true;
   }
 
-  if (e.count >= MAX) return false;
-  e.count++;
+  if (entry.count >= MAX) return false;
+  entry.count += 1;
   return true;
 }
 
-function response(headers, statusCode, body) {
+function makeResponse(headers, statusCode, body) {
   return {
     statusCode,
     headers,
@@ -51,147 +51,100 @@ function extractJsonChunk(raw) {
   return cleaned;
 }
 
+function repairCommonJsonIssues(text) {
+  return text
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/,\s*}/g, "}")
+    .replace(/,\s*]/g, "]")
+    .replace(/\t/g, " ");
+}
+
 function tryParseJson(raw) {
-  const candidates = [
+  const base = extractJsonChunk(raw);
+  const attempts = [
     raw,
-    extractJsonChunk(raw),
-    extractJsonChunk(raw)
-      .replace(/[“”]/g, '"')
-      .replace(/[‘’]/g, "'")
-      .replace(/\t/g, " "),
+    base,
+    repairCommonJsonIssues(base),
   ];
 
-  for (const candidate of candidates) {
-    if (!candidate) continue;
+  for (const attempt of attempts) {
+    if (!attempt) continue;
     try {
-      return JSON.parse(candidate);
+      return JSON.parse(attempt);
     } catch {}
   }
 
   return null;
 }
 
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function getLineValue(text, key) {
-  const regex = new RegExp(`^${escapeRegex(key)}:\\s*(.*)$`, "mi");
-  const match = text.match(regex);
-  return match ? match[1].trim() : "";
-}
-
-function parsePipeList(value) {
-  return (value || "")
-    .split("|")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function parseListSection(text, sectionName, mapper) {
-  const lines = text.split(/\r?\n/);
-  const results = [];
-  let inSection = false;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    if (line === `${sectionName}:`) {
-      inSection = true;
-      continue;
-    }
-
-    if (!inSection) continue;
-
-    if (/^[A-Z_]+:\s*/.test(line)) break;
-
-    const mapped = mapper(line);
-    if (mapped) results.push(mapped);
+function normalizeTags(tags, fallback) {
+  if (Array.isArray(tags)) {
+    const clean = tags
+      .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
+      .filter(Boolean);
+    if (clean.length) return clean.slice(0, 5);
   }
-
-  return results;
+  return fallback;
 }
 
-function parseMoreSongs(text) {
-  return parseListSection(text, "MORE_SONGS", (line) => {
-    const match = line.match(/^\d+\.\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*)$/);
-    if (!match) return null;
+function normalizeSongs(list) {
+  if (!Array.isArray(list)) return [];
 
-    const song = {
-      title: match[1].trim(),
-      artist: match[2].trim(),
-      mood_tag: match[3].trim(),
-    };
-
-    return song.title && song.artist ? song : null;
-  });
-}
-
-function parseTrendingNow(text) {
-  return parseListSection(text, "TRENDING_NOW", (line) => {
-    const richMatch = line.match(/^\d+\.\s*(.*?)\s*\|\s*(.*)$/);
-    if (richMatch) {
-      const item = {
-        artist: richMatch[1].trim(),
-        reason: richMatch[2].trim(),
+  return list
+    .map((song) => {
+      if (!song || typeof song !== "object") return null;
+      return {
+        title: typeof song.title === "string" ? song.title.trim() : "",
+        artist: typeof song.artist === "string" ? song.artist.trim() : "",
+        mood_tag:
+          typeof song.mood_tag === "string"
+            ? song.mood_tag.trim()
+            : typeof song.mood === "string"
+            ? song.mood.trim()
+            : "",
       };
-      return item.artist ? item : null;
-    }
-
-    const simpleMatch = line.match(/^\d+\.\s*(.*)$/);
-    if (simpleMatch) {
-      const item = {
-        artist: simpleMatch[1].trim(),
-        reason: "",
-      };
-      return item.artist ? item : null;
-    }
-
-    return null;
-  });
+    })
+    .filter((song) => song && song.title && song.artist)
+    .slice(0, 5);
 }
 
-function parseFallbackText(raw) {
-  if (!raw) return null;
+function normalizeTrending(list) {
+  if (!Array.isArray(list)) return [];
 
-  const parsed = {
-    vibe_description: getLineValue(raw, "VIBE_DESCRIPTION"),
-    perfect_song: {
-      title: getLineValue(raw, "PERFECT_SONG_TITLE"),
-      artist: getLineValue(raw, "PERFECT_SONG_ARTIST"),
-      reason: getLineValue(raw, "PERFECT_SONG_REASON"),
-      tags: parsePipeList(getLineValue(raw, "PERFECT_SONG_TAGS")),
-    },
-    more_songs: parseMoreSongs(raw),
-    trending_now: parseTrendingNow(raw),
-  };
+  return list
+    .map((item) => {
+      if (typeof item === "string") {
+        const artist = item.trim();
+        return artist ? { artist, reason: "" } : null;
+      }
 
-  const style_aesthetic = getLineValue(raw, "OUTFIT_STYLE_AESTHETIC");
-  const color_story = getLineValue(raw, "OUTFIT_COLOR_STORY");
-  const vibe_summary = getLineValue(raw, "OUTFIT_VIBE_SUMMARY");
-  const style_tags = parsePipeList(getLineValue(raw, "OUTFIT_STYLE_TAGS"));
+      if (!item || typeof item !== "object") return null;
 
-  if (style_aesthetic || color_story || vibe_summary || style_tags.length) {
-    parsed.outfit_analysis = {
-      style_aesthetic,
-      color_story,
-      vibe_summary,
-      style_tags,
-    };
-  }
+      const artist =
+        typeof item.artist === "string"
+          ? item.artist.trim()
+          : typeof item.name === "string"
+          ? item.name.trim()
+          : "";
 
-  return parsed;
+      const reason =
+        typeof item.reason === "string" ? item.reason.trim() : "";
+
+      return artist ? { artist, reason } : null;
+    })
+    .filter(Boolean)
+    .slice(0, 5);
 }
 
-function normalize(parsed) {
+function normalizeResult(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
 
   const perfectSong = parsed.perfect_song || parsed.perfectSong || {};
   const moreSongs = parsed.more_songs || parsed.moreSongs || [];
   const trendingNow = parsed.trending_now || parsed.trendingNow || [];
 
-  const normalized = {
+  const result = {
     vibe_description:
       typeof parsed.vibe_description === "string"
         ? parsed.vibe_description.trim()
@@ -205,52 +158,15 @@ function normalize(parsed) {
         typeof perfectSong.reason === "string"
           ? perfectSong.reason.trim()
           : "",
-      tags: Array.isArray(perfectSong.tags)
-        ? perfectSong.tags.filter((tag) => typeof tag === "string" && tag.trim())
-        : [],
+      tags: normalizeTags(perfectSong.tags, ["vibe", "music", "match"]),
     },
-    more_songs: Array.isArray(moreSongs)
-      ? moreSongs
-          .map((song) => {
-            if (!song || typeof song !== "object") return null;
-            return {
-              title: typeof song.title === "string" ? song.title.trim() : "",
-              artist: typeof song.artist === "string" ? song.artist.trim() : "",
-              mood_tag:
-                typeof song.mood_tag === "string"
-                  ? song.mood_tag.trim()
-                  : typeof song.mood === "string"
-                  ? song.mood.trim()
-                  : "",
-            };
-          })
-          .filter((song) => song && song.title && song.artist)
-      : [],
-    trending_now: Array.isArray(trendingNow)
-      ? trendingNow
-          .map((item) => {
-            if (typeof item === "string") {
-              return { artist: item.trim(), reason: "" };
-            }
-            if (!item || typeof item !== "object") return null;
-            return {
-              artist:
-                typeof item.artist === "string"
-                  ? item.artist.trim()
-                  : typeof item.name === "string"
-                  ? item.name.trim()
-                  : "",
-              reason:
-                typeof item.reason === "string" ? item.reason.trim() : "",
-            };
-          })
-          .filter((item) => item && item.artist)
-      : [],
+    more_songs: normalizeSongs(moreSongs),
+    trending_now: normalizeTrending(trendingNow),
   };
 
   const outfit = parsed.outfit_analysis || parsed.outfitAnalysis;
   if (outfit && typeof outfit === "object") {
-    normalized.outfit_analysis = {
+    result.outfit_analysis = {
       style_aesthetic:
         typeof outfit.style_aesthetic === "string"
           ? outfit.style_aesthetic.trim()
@@ -269,26 +185,137 @@ function normalize(parsed) {
           : typeof outfit.vibeSummary === "string"
           ? outfit.vibeSummary.trim()
           : "",
-      style_tags: Array.isArray(outfit.style_tags)
-        ? outfit.style_tags.filter((tag) => typeof tag === "string" && tag.trim())
-        : Array.isArray(outfit.styleTags)
-        ? outfit.styleTags.filter((tag) => typeof tag === "string" && tag.trim())
-        : [],
+      style_tags: normalizeTags(outfit.style_tags || outfit.styleTags, []),
     };
   }
 
   if (
-    !normalized.vibe_description ||
-    !normalized.perfect_song.title ||
-    !normalized.perfect_song.artist ||
-    !normalized.perfect_song.reason ||
-    normalized.more_songs.length === 0 ||
-    normalized.trending_now.length === 0
+    !result.vibe_description ||
+    !result.perfect_song.title ||
+    !result.perfect_song.artist ||
+    !result.perfect_song.reason ||
+    result.more_songs.length === 0
   ) {
     return null;
   }
 
-  return normalized;
+  if (result.trending_now.length === 0) {
+    result.trending_now = result.more_songs.slice(0, 5).map((song) => ({
+      artist: song.artist,
+      reason: "Matches this vibe.",
+    }));
+  }
+
+  return result;
+}
+
+function buildEmergencyResult(rawText) {
+  const preview = rawText
+    ? rawText.replace(/\s+/g, " ").trim().slice(0, 220)
+    : "A moody, stylish, image-driven music match.";
+
+  return {
+    vibe_description: preview || "A moody, stylish, image-driven music match.",
+    perfect_song: {
+      title: "Sunflower",
+      artist: "Post Malone & Swae Lee",
+      reason:
+        "The AI response came back in a broken format, so this is a safe fallback result while keeping the app working. The overall vibe still reads as cinematic, warm, and instantly playlist-friendly.",
+      tags: ["cinematic", "warm", "vibey"],
+    },
+    more_songs: [
+      { title: "Electric Feel", artist: "MGMT", mood_tag: "dreamy" },
+      { title: "Sweater Weather", artist: "The Neighbourhood", mood_tag: "moody" },
+      { title: "Midnight City", artist: "M83", mood_tag: "neon" },
+      { title: "After Dark", artist: "Mr.Kitty", mood_tag: "night" },
+      { title: "Golden", artist: "Harry Styles", mood_tag: "glow" },
+    ],
+    trending_now: [
+      { artist: "The Weeknd", reason: "Fits glossy late-night energy." },
+      { artist: "Billie Eilish", reason: "Fits intimate moody visuals." },
+      { artist: "SZA", reason: "Fits soft modern emotional texture." },
+      { artist: "Lana Del Rey", reason: "Fits cinematic melancholy." },
+      { artist: "Arctic Monkeys", reason: "Fits stylish cool-toned atmosphere." },
+    ],
+  };
+}
+
+async function callGemini(apiKey, body) {
+  const url =
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json();
+  return { response, data };
+}
+
+async function repairJsonWithGemini(apiKey, rawText) {
+  const repairBody = {
+    contents: [
+      {
+        parts: [
+          {
+            text: `Convert the following broken AI output into ONE valid JSON object only.
+
+Required JSON shape:
+{
+  "vibe_description": "string",
+  "outfit_analysis": {
+    "style_aesthetic": "string",
+    "color_story": "string",
+    "vibe_summary": "string",
+    "style_tags": ["string"]
+  },
+  "perfect_song": {
+    "title": "string",
+    "artist": "string",
+    "reason": "string",
+    "tags": ["string"]
+  },
+  "more_songs": [
+    { "title": "string", "artist": "string", "mood_tag": "string" }
+  ],
+  "trending_now": [
+    { "artist": "string", "reason": "string" }
+  ]
+}
+
+Rules:
+- Return valid JSON only
+- No markdown
+- If outfit info is missing, omit outfit_analysis
+- Ensure more_songs has 5 items when possible
+- Ensure trending_now has 5 items when possible
+
+Broken output:
+${rawText}`,
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 1400,
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
+      responseMimeType: "application/json",
+    },
+  };
+
+  const { response, data } = await callGemini(apiKey, repairBody);
+  if (!response.ok) return null;
+
+  const repairedRaw = getRawText(data);
+  return tryParseJson(repairedRaw);
 }
 
 exports.handler = async function (event) {
@@ -304,81 +331,49 @@ exports.handler = async function (event) {
   }
 
   if (event.httpMethod !== "POST") {
-    return response(headers, 405, { error: "Method not allowed" });
+    return makeResponse(headers, 405, { error: "Method not allowed" });
   }
 
   const ip = event.headers["x-forwarded-for"]?.split(",")[0] || "unknown";
   if (!checkRate(ip)) {
-    return response(headers, 429, { error: "Too many requests. Wait a moment." });
+    return makeResponse(headers, 429, {
+      error: "Too many requests. Wait a moment.",
+    });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return response(headers, 500, { error: "GEMINI_API_KEY not set on server." });
+    return makeResponse(headers, 500, {
+      error: "GEMINI_API_KEY not set on server.",
+    });
   }
 
   let body;
   try {
     body = JSON.parse(event.body || "{}");
   } catch {
-    return response(headers, 400, { error: "Invalid JSON body." });
+    return makeResponse(headers, 400, { error: "Invalid JSON body." });
   }
 
   const { imageBase64, imageMime, prompt } = body;
 
   if (!imageBase64 || !imageMime || !prompt) {
-    return response(headers, 400, {
+    return makeResponse(headers, 400, {
       error: "Missing imageBase64, imageMime, or prompt.",
     });
   }
 
   if (!imageMime.startsWith("image/")) {
-    return response(headers, 400, { error: "Invalid image type." });
+    return makeResponse(headers, 400, { error: "Invalid image type." });
   }
 
   if (imageBase64.length > 14_000_000) {
-    return response(headers, 413, {
+    return makeResponse(headers, 413, {
       error: "Image too large. Use an image under 10MB.",
     });
   }
 
-  const GEMINI_URL =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
-
-  const fallbackFormat = `
-If you cannot produce perfect JSON, return this exact plain-text fallback format instead.
-
-VIBE_DESCRIPTION: 2 vivid sentences
-OUTFIT_STYLE_AESTHETIC: specific fashion aesthetic or blank
-OUTFIT_COLOR_STORY: 5 words or less or blank
-OUTFIT_VIBE_SUMMARY: 2 sentences or blank
-OUTFIT_STYLE_TAGS: tag1 | tag2 | tag3 | tag4 | tag5
-PERFECT_SONG_TITLE: song title
-PERFECT_SONG_ARTIST: artist name
-PERFECT_SONG_REASON: 2-3 sentences
-PERFECT_SONG_TAGS: tag1 | tag2 | tag3
-MORE_SONGS:
-1. title | artist | mood tag
-2. title | artist | mood tag
-3. title | artist | mood tag
-4. title | artist | mood tag
-5. title | artist | mood tag
-TRENDING_NOW:
-1. artist | short reason
-2. artist | short reason
-3. artist | short reason
-4. artist | short reason
-5. artist | short reason
-
-Rules:
-- No markdown fences
-- No intro text
-- No outro text
-- If returning JSON, use double quotes
-- If returning fallback text, keep one value per labeled line
-`;
-
-  const geminiBody = {
+  const primaryBody = {
     contents: [
       {
         parts: [
@@ -389,7 +384,17 @@ Rules:
             },
           },
           {
-            text: `${prompt}\n\n${fallbackFormat}`,
+            text: `${prompt}
+
+IMPORTANT:
+- Return one valid JSON object only
+- No markdown fences
+- No explanation text
+- Use double quotes
+- Include keys: vibe_description, perfect_song, more_songs, trending_now
+- perfect_song must include title, artist, reason, tags
+- more_songs must be an array of 5 objects with title, artist, mood_tag
+- trending_now must be an array of 5 objects with artist, reason`,
           },
         ],
       },
@@ -403,68 +408,54 @@ Rules:
       responseMimeType: "application/json",
     },
     safetySettings: [
-      {
-        category: "HARM_CATEGORY_HARASSMENT",
-        threshold: "BLOCK_MEDIUM_AND_ABOVE",
-      },
-      {
-        category: "HARM_CATEGORY_HATE_SPEECH",
-        threshold: "BLOCK_MEDIUM_AND_ABOVE",
-      },
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
     ],
   };
 
   try {
-    const apiResponse = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify(geminiBody),
-    });
+    const { response, data } = await callGemini(apiKey, primaryBody);
 
-    const data = await apiResponse.json();
-
-    if (!apiResponse.ok) {
+    if (!response.ok) {
       const msg = data?.error?.message || "Gemini API error";
 
       if (
-        apiResponse.status === 429 ||
-        /quota|rate limit|resource has been exhausted/i.test(msg)
+        response.status === 429 ||
+        /quota|rate limit|exceeded|resource has been exhausted/i.test(msg)
       ) {
-        return response(headers, 429, {
+        return makeResponse(headers, 429, {
           error: "AI is temporarily busy or out of quota. Please try again in a minute.",
         });
       }
 
-      return response(headers, apiResponse.status, { error: msg });
+      return makeResponse(headers, response.status, { error: msg });
     }
 
     const raw = getRawText(data);
     if (!raw) {
-      console.error("Gemini empty response:", JSON.stringify(data, null, 2));
-      return response(headers, 500, { error: "Empty response from Gemini." });
+      return makeResponse(headers, 500, { error: "Empty response from Gemini." });
     }
 
     let parsed = tryParseJson(raw);
 
     if (!parsed) {
-      parsed = parseFallbackText(raw);
+      parsed = await repairJsonWithGemini(apiKey, raw);
     }
 
-    parsed = normalize(parsed);
+    parsed = normalizeResult(parsed);
 
     if (!parsed) {
-      console.error("Gemini raw output parse failure:");
+      console.error("Primary Gemini raw output:");
       console.error(raw);
-      return response(headers, 500, { error: "AI returned invalid JSON. Try again." });
+
+      const emergency = buildEmergencyResult(raw);
+      return makeResponse(headers, 200, emergency);
     }
 
-    return response(headers, 200, parsed);
+    return makeResponse(headers, 200, parsed);
   } catch (err) {
     console.error("Gemini error:", err);
-    return response(headers, 500, {
+    return makeResponse(headers, 500, {
       error: "Failed to reach Gemini. Check your connection.",
     });
   }
