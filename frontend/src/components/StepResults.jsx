@@ -26,6 +26,35 @@ function PlayBtn({ title, artist }) {
   );
 }
 
+function TrendingCard({ song, flag, label, color }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={{
+        flex: 1, minWidth: 0,
+        background: `linear-gradient(135deg, ${color}18, ${color}08)`,
+        border: `1px solid ${color}30`,
+        borderRadius: 16, padding: "18px 20px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+        <span style={{ fontSize: 18 }}>{flag}</span>
+        <span style={{ fontSize: 10, letterSpacing: "1.2px", textTransform: "uppercase", color: color, fontWeight: 500 }}>{label}</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, background: `${color}20`, border: `1px solid ${color}30`, borderRadius: 100, padding: "2px 8px", color: color }}>🔥 Trending</span>
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 3, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{song.title}</div>
+      <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10 }}>{song.artist}</div>
+      {song.why_trending && (
+        <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 14, fontStyle: "italic" }}>
+          "{song.why_trending}"
+        </div>
+      )}
+      <PlayBtn title={song.title} artist={song.artist} />
+    </motion.div>
+  );
+}
+
 export default function StepResults({ results, onReset }) {
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
@@ -40,19 +69,20 @@ export default function StepResults({ results, onReset }) {
     const ps = results.perfect_song;
     const more = (results.more_songs || []).slice(0, 4);
     const oa = results.outfit_analysis;
+    const tn = results.trending_now;
     const lines = [
-      "🎵 My FindMyMusicc playlist:",
+      "🎵 FindMyMusicc picked my soundtrack:",
       oa ? `\n👗 Style: ${oa.style_aesthetic}` : "",
       `\n★ ${ps.title} — ${ps.artist}`,
       ...more.map((s, i) => `${i + 1}. ${s.title} — ${s.artist}`),
-      "\nfindmymusicc.app ✦",
+      tn ? `\n🔥 Trending: ${tn.international?.title} & ${tn.indian?.title}` : "",
+      "\nfindmymusicc.netlify.app ✦",
     ].filter(Boolean).join("\n");
 
-    // Save to localStorage
     try {
-      const saved = JSON.parse(localStorage.getItem("mt_saved") || "[]");
+      const saved = JSON.parse(localStorage.getItem("fmc_saved") || "[]");
       saved.unshift({ id: Date.now(), vibe: (results.vibe_description || "").slice(0, 65) + "...", songs: [ps, ...more], date: new Date().toLocaleDateString() });
-      localStorage.setItem("mt_saved", JSON.stringify(saved.slice(0, 5)));
+      localStorage.setItem("fmc_saved", JSON.stringify(saved.slice(0, 5)));
     } catch {}
 
     if (navigator.share) {
@@ -64,13 +94,14 @@ export default function StepResults({ results, onReset }) {
 
   const ps = results.perfect_song;
   const oa = results.outfit_analysis;
+  const tn = results.trending_now;
 
   return (
     <div>
       {/* Header */}
       <div style={{ textAlign: "center", padding: "34px 0 26px" }}>
         <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 30, fontWeight: 400, marginBottom: 8 }}>Your Soundtrack ✦</h2>
-        <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.6, maxWidth: 520, margin: "0 auto" }}>
+        <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.7, maxWidth: 520, margin: "0 auto" }}>
           {results.vibe_description}
         </p>
       </div>
@@ -89,9 +120,7 @@ export default function StepResults({ results, onReset }) {
           <div style={{ fontSize: 11, letterSpacing: "1.4px", textTransform: "uppercase", color: "var(--pink)", marginBottom: 12 }}>👗 Outfit & Style Reading</div>
           <div style={{ fontSize: 17, fontWeight: 500, color: "var(--pink)", marginBottom: 7 }}>{oa.style_aesthetic}</div>
           <div style={{ fontSize: 14, color: "var(--text)", lineHeight: 1.7 }}>{oa.vibe_summary}</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>
-            Color palette: <span style={{ color: "var(--text)" }}>{oa.color_story}</span>
-          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>Color palette: <span style={{ color: "var(--text)" }}>{oa.color_story}</span></div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
             {(oa.style_tags || []).map(t => (
               <span key={t} style={{ padding: "4px 12px", borderRadius: 100, background: "rgba(244,114,182,0.1)", border: "1px solid rgba(244,114,182,0.2)", fontSize: 12, color: "var(--pink)" }}>{t}</span>
@@ -129,7 +158,7 @@ export default function StepResults({ results, onReset }) {
       </motion.div>
 
       {/* More songs */}
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 11, letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--muted)", marginBottom: 12 }}>Also perfect for this vibe</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {(results.more_songs || []).map((s, i) => (
@@ -137,7 +166,7 @@ export default function StepResults({ results, onReset }) {
               key={i}
               initial={{ opacity: 0, x: 16 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.1 + i * 0.07 }}
+              transition={{ delay: 0.08 + i * 0.07 }}
               style={{
                 background: "var(--card)", border: "1px solid var(--border)", borderRadius: 15,
                 padding: "16px 18px", display: "flex", alignItems: "center", gap: 14,
@@ -162,6 +191,38 @@ export default function StepResults({ results, onReset }) {
         </div>
       </div>
 
+      {/* Trending Now */}
+      {tn && (tn.international || tn.indian) && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          style={{ marginBottom: 20 }}
+        >
+          <div style={{ fontSize: 11, letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--muted)", marginBottom: 12 }}>
+            🔥 Trending right now
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {tn.international && (
+              <TrendingCard
+                song={tn.international}
+                flag="🌍"
+                label="International"
+                color="#378ADD"
+              />
+            )}
+            {tn.indian && (
+              <TrendingCard
+                song={tn.indian}
+                flag="🇮🇳"
+                label="India"
+                color="#f472b6"
+              />
+            )}
+          </div>
+        </motion.div>
+      )}
+
       {/* Actions */}
       <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
         <button onClick={onReset} style={{ ...tokens.btnSecondary, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -177,9 +238,7 @@ export default function StepResults({ results, onReset }) {
         </button>
       </div>
 
-      {/* Toast */}
       <motion.div
-        initial={false}
         animate={{ y: toastVisible ? 0 : 100, opacity: toastVisible ? 1 : 0 }}
         style={{
           position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)",
